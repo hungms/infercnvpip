@@ -1,0 +1,22 @@
+Package: infercnvpip
+Title: InferCNV Pipeline for Single-Cell Data
+Version: 0.1.0
+Authors@R: 
+    person(given = "Miu Shing", family = "Hung", email = "matthewhungms@gmail.com", role = c("aut", "cre"), comment = c(ORCID = "0009-0004-0412-4374"))
+Description: Provides a streamlined interface to the InferCNV package for analyzing copy number
+    variations in single-cell RNA-seq data. This package simplifies the workflow for running
+    InferCNV on Seurat objects.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+URL: https://hungms.github.io/infercnvpip/
+BugReports: https://github.com/hungms/infercnvpip/issues
+LazyData: true
+Depends: 
+    R (>= 4.0.0),
+    Seurat (>= 5.0.0)
+Imports:
+    dplyr,
+    magrittr,
+Remotes: broadinstitute/infercnv

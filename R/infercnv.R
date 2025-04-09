@@ -1,93 +1,161 @@
-suppressMessages({
-library(scUnify)
-library(infercnv)
-setwd("/nemo/lab/caladod/working/Matthew/project/oscar/OA_SC23423/20250131/output/infercnv")})
-
-
-gene_annot <- read.table("/flask/scratch/caladod/hungm/reference/alignment/infercnv/GRCm39_gene_annotations.txt", sep = "\t", row.names = 1, header = F)
-colnames(gene_annot) <- NULL
-
-SC23423 = qread("/nemo/lab/caladod/working/Matthew/project/oscar/OA_SC23423/seurat/SC23423_merged_rchop_placebo_tumour_integrated.qs")
-reference = qread("/nemo/lab/caladod/working/Matthew/project/oscar/OA_SC23423/seurat/20240628_SC23423_B220posGFPneg.qs")
-genes <- intersect(rownames(SC23423@assays$RNA$counts), rownames(reference@assays$RNA$counts))
-
-SC23423[["RNA_filter"]] <- CreateAssay5Object(SC23423@assays$RNA$counts[genes,], min.cells = 5)
-SC23423@meta.data$group <- gsub("GFPpos", "", SC23423@meta.data$group)
-SC23423@meta.data$group	<- gsub("B220pos", "PLACEBO", SC23423@meta.data$group)
-SC23423@meta.data$leiden_0.6 = paste0("C", sprintf("%02d", as.numeric(SC23423@meta.data$leiden_0.6)-1))
-print(unique(SC23423@meta.data$leiden_0.6))
-
-reference[["RNA_filter"]] <- CreateAssay5Object(reference@assays$RNA$counts[genes,], min.cells = 5)
-reference@meta.data$group <- "B220+GFP-"
-reference@meta.data$run_id <- "B220+GFP-"
-reference@meta.data$leiden_0.6 <- "B220+GFP-"
-
-SC23423_total <- merge(SC23423, reference)
-SC23423_total[["RNA_filter"]] <- JoinLayers(SC23423_total[["RNA_filter"]])
-
-SC23423_total@meta.data <- SC23423_total@meta.data %>%
-            mutate(mice = ifelse(is.na(`MULTIseq...ID`), as.character(run_id), paste0(as.character(run_id), "_", `MULTIseq...ID`)))
-
-mice = unique(SC23423_total@meta.data$mice)
-mice = mice[which(mice != "B220+GFP-")]
-
-rm(SC23423, reference)
-
-for(x in mice){
-    obj <- subset(SC23423_total, subset = mice %in% c(mice, "B220+GFP-"))
-    rna_counts = obj@assays$RNA_filter$counts
-    annotations = obj@meta.data %>%
-                    select("mice")
-    colnames(annotations) <- NULL
-
-    infercnv_obj = CreateInfercnvObject(raw_counts_matrix=rna_counts,
-                                        annotations_file=annotations,
-                                        delim="\t",
-                                        gene_order_file=gene_annot,
-                                        ref_group_names=c("B220+GFP-"))
-
-    outdir <- paste0("/nemo/lab/caladod/working/Matthew/project/oscar/OA_SC23423/20250131/output/infercnv/by_mice/", x)
-    dir.create(outdir)
-    infercnv_obj = infercnv::run(infercnv_obj,
-                                cutoff=0.1, # cutoff=1 works well for Smart-seq2, and cutoff=0.1 works well for 10x Genomics
-                                out_dir=outdir,
-                                cluster_by_groups=F,
-                                denoise=TRUE,
-                                HMM=TRUE,
-				analysis_mode = "subclusters",
-				tumor_subcluster_partition_method = c("random_trees"),
-HMM_type = c("i6"),
-output_format="pdf",
-num_threads = 30
-    )
-}
-qsave(infercnv_obj, file = paste0(outdir, "infercnv_obj.qs"))
-
-
-
-
-
-
+#' Get gene annotations
+#'
+#' This function retrieves the gene annotations for a given organism and version.
+#'
+#' @param org The organism to get annotations for. Can be "human" or "mouse".
+#' @param version The version of the annotations to use. Can be "latest" or a specific version number.
+#' @return A data frame containing the gene annotations.
+#' 
+#' @export
+#' 
+#' @examples
+#' \dontrun{
+#' get_annotations(org = "human", version = "latest")
+#' }
 get_annotations <- function(org = "human", version = "latest"){
     if(version == "latest"){
-        annot_files <- list.files(system.file("extdata", package = "infercnv"), full.names = T)
+        annot_files <- list.files(system.file("extdata", package = "infercnvpip"), full.names = T)
         annot_files <- annot_files[grepl(org, annot_files)]
-        annot <- annot_files[length(annot_files)]}
+        selected_annot <- annot_files[length(annot_files)]}
     else{
         if(org == "human"){
-            annot <- system.file("extdata", paste0("human_", version, "_gene_annotations.txt"), package = "infercnv")}
+            selected_annot <- system.file("extdata", paste0("human_", version, "_gene_annotations.txt"), package = "infercnv")}
         else{
-            annot <- system.file("extdata", paste0("mouse_", version, "_gene_annotations.txt"), package = "infercnv")}}
+            selected_annot <- system.file("extdata", paste0("mouse_", version, "_gene_annotations.txt"), package = "infercnv")}}
 
-    gene_annot <- read.table(annot, sep = "\t", row.names = 1, header = F)
+    gene_annot <- read.table(selected_annot, sep = "\t", row.names = 1, header = F)
     colnames(gene_annot) <- NULL
     return(gene_annot)}
 
 
+#' Run infercnv on an individual object
+#'
+#' This function runs infercnv on an individual object.
+#'
+#' @param obj The object to run infercnv on.
+#' @param ref_obj The reference object to run infercnv on.
+#' @param individual_name The name of the individual to run infercnv on.
+#' @param annot_column The column name of the annotations to run infercnv on.
+#' @param org The organism to run infercnv on.
+#' @param version The version of the annotations to use.
+#' @param assay The assay to run infercnv on.
+#' @param save_dir The directory to save the infercnv results.
+#' @param ncores The number of cores to use.
+#' @param ... Additional arguments to pass to infercnv::run.
+#' @return A list of infercnv objects.
+#' 
+#' @export
+#' 
+#' @examples
+#' \dontrun{
+#' run_infercnv_individual(obj, ref_obj = NULL, individual_name, annot_column, org = "human", version = "latest", assay = "RNA", save_dir = getwd(), ncores = 1, ...)
+#' }
+run_infercnv_individual <- function(obj, ref_obj = NULL, individual_name, annot_column, org, version = "latest", assay = "RNA", save_dir = getwd(), ncores = 1, ...){
+
+    stopifnot(assay %in% names(obj@assays))
+    stopifnot(annot_column %in% colnames(obj@meta.data))
+    stopifnot(org %in% c("human", "mouse"))
+
+    # merge objects
+    if(is.null(ref_obj)){
+        merged_obj <- obj
+        ref_group_names <- NULL
+        }
+    else{
+        stopifnot(assay %in% names(ref_obj@assays))
+        stopifnot(annot_column %in% colnames(ref_obj@meta.data))
+        merged_obj <- merge(obj, ref_obj)
+        merged_obj[[assay]] <- JoinLayers(merged_obj[[assay]])
+        ref_group_names <- unique(ref_obj@meta.data[[annot_column]])
+        }
+
+    # get counts
+    counts = as.matrix(merged_obj[[assay]]$counts)
+
+    # get cell annotations
+    cell_annot = merged_obj@meta.data %>% dplyr::select(annot_column)
+    colnames(cell_annot) <- NULL
+
+    # get gene annotations
+    gene_annot <- get_annotations(org = org, version = version)
+
+    # create infercnv object
+    infercnv_obj = CreateInfercnvObject(raw_counts_matrix=counts,
+                                        annotations_file=cell_annot,
+                                        delim="\t",
+                                        gene_order_file=gene_annot,
+                                        ref_group_names=ref_group_names)
+
+    # set output directory
+    out_dir <- paste0(save_dir, "/", individual_name)
+    dir.create(out_dir, recursive = T)
+
+    # run infercnv with cluster_by_groups = F
+    processed_infercnv_obj = infercnv::run(infercnv_obj,
+                                cutoff=0.1,
+                                out_dir=paste0(out_dir, "/NO-GROUPING/"),
+                                cluster_by_groups=F,
+                                denoise=TRUE,
+                                HMM=TRUE,
+                                analysis_mode = "subclusters",
+                                tumor_subcluster_partition_method = c("random_trees"),
+                                HMM_type = c("i6"),
+                                output_format="pdf",
+                                num_threads = ncores,
+                                ...)
+
+    # run infercnv with cluster_by_groups = T
+    processed_infercnv_obj = infercnv::run(infercnv_obj,
+                                cutoff=0.1,
+                                out_dir=paste0(out_dir, "/GROUP-BY-", annot_column, "/"),
+                                cluster_by_groups=T,
+                                denoise=TRUE,
+                                HMM=TRUE,
+                                analysis_mode = "subclusters",
+                                tumor_subcluster_partition_method = c("random_trees"),
+                                HMM_type = c("i6"),
+                                output_format="pdf",
+                                num_threads = ncores,
+                                ...)
+}
 
 
 
-run_infercnv_individual <- function(obj, outdir){
+#' Run infercnv on multiple objects
+#'
+#' This function runs infercnv on multiple objects.
+#'
+#' @param obj The object to run infercnv on.    
+#' @param split.by The column name to split the object by.
+#' @param ref_obj The reference object to run infercnv on.
+#' @param org The organism to run infercnv on.
+#' @param save_dir The directory to save the infercnv results.
+#' @param ... Additional arguments to pass to run_infercnv_individual.
+#' 
+#' @export
+#' 
+#' @examples
+#' \dontrun{
+#' run_infercnv_multi(obj, split.by, ref_obj = NULL, org = "human", annot_column, save_dir = getwd(), ...)
+#' }
+run_infercnv_multi <- function(obj, split.by, ref_obj = NULL, org, annot_column, save_dir = getwd(), ...){
 
+    stopifnot(split.by %in% colnames(obj@meta.data))
+    stopifnot(annot_column %in% colnames(obj@meta.data))
+    stopifnot(org %in% c("human", "mouse"))
 
-list.files(system.file("extdata", package = "strpipe"), full.names = T)
+    # split object
+    obj.list <- SplitObject(obj, split.by = split.by)
+
+    # run infercnv on each unique value
+    for(i in 1:length(obj.list)){
+        run_infercnv_individual(
+            obj = obj.list[[i]], 
+            ref_obj = ref_obj, 
+            individual_name = names(obj.list)[i], 
+            annot_column = annot_column,
+            org = org,
+            save_dir = save_dir,
+            ...)
+    }
+}

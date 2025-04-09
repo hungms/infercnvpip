@@ -1,0 +1,15 @@
+^.*\.Rproj$
+^\.Rproj\.user$
+^README\.md$
+^\.github$
+^_pkgdown\.yml$
+^docs$
+^pkgdown$
+^\.git$
+^cran-comments\.md$
+^CRAN-RELEASE$
+^\.travis\.yml$
+^\.gitlab-ci\.yml$
+^appveyor\.yml$
+^codecov\.yml$
+^\.covrignore$ 
