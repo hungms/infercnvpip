@@ -15,8 +15,8 @@ BugReports: https://github.com/hungms/infercnvpip/issues
 LazyData: true
 Depends: 
     R (>= 4.0.0),
-    Seurat (>= 5.0.0)
 Imports:
+    Seurat (>= 5.0.0),
     dplyr,
     magrittr,
 Remotes: broadinstitute/infercnv

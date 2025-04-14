@@ -60,21 +60,24 @@ run_infercnv_individual <- function(obj, ref_obj = NULL, individual_name, annot_
     if(is.null(ref_obj)){
         merged_obj <- obj
         ref_group_names <- NULL
+        message("No reference groups are set")
         }
     else{
+        message("Merging query and reference objects as a single Seurat object for inferCNV input...")
         stopifnot(assay %in% names(ref_obj@assays))
         stopifnot(annot_column %in% colnames(ref_obj@meta.data))
         merged_obj <- merge(obj, ref_obj)
         merged_obj[[assay]] <- JoinLayers(merged_obj[[assay]])
         ref_group_names <- unique(ref_obj@meta.data[[annot_column]])
+        message("Reference groups are set to: ", paste(ref_group_names, collapse = ", "))
         }
 
+    message("Creating infercnv object...")
     # get counts
     counts = as.matrix(merged_obj[[assay]]$counts)
 
     # get cell annotations
-    cell_annot = merged_obj@meta.data %>% dplyr::select(annot_column)
-    colnames(cell_annot) <- NULL
+    cell_annot = merged_obj@meta.data %>% dplyr::select(annot_column) # %>% rownames_to_column(var = "cell_id") %>% as.tibble(.)
 
     # get gene annotations
     gene_annot <- get_annotations(org = org, version = version)
@@ -90,6 +93,7 @@ run_infercnv_individual <- function(obj, ref_obj = NULL, individual_name, annot_
     out_dir <- paste0(save_dir, "/", individual_name)
     dir.create(out_dir, recursive = T)
 
+    message("Running inferCNV on ", individual_name, "...")
     # run infercnv with cluster_by_groups = F
     processed_infercnv_obj = infercnv::run(infercnv_obj,
                                 cutoff=0.1,
@@ -145,17 +149,41 @@ run_infercnv_multi <- function(obj, split.by, ref_obj = NULL, org, annot_column,
     stopifnot(org %in% c("human", "mouse"))
 
     # split object
+    message("Splitting query object per individual...")
     obj.list <- SplitObject(obj, split.by = split.by)
 
-    # run infercnv on each unique value
-    for(i in 1:length(obj.list)){
-        run_infercnv_individual(
-            obj = obj.list[[i]], 
-            ref_obj = ref_obj, 
-            individual_name = names(obj.list)[i], 
-            annot_column = annot_column,
-            org = org,
-            save_dir = save_dir,
-            ...)
+    if(!is.null(ref_obj)){
+
+        if(split.by %in% colnames(ref_obj@meta.data)){
+            message("Splitting reference object per individual...")
+            ref_obj.list <- SplitObject(ref_obj, split.by = split.by)
+            ref_obj.list <- ref_obj.list[which(names(ref_obj.list) %in% names(obj.list))]
+            ref_obj.list <- ref_obj.list[names(obj.list)]
+            stopifnot(all(names(obj.list) == names(ref_obj.list)))
+            }
+
+        message("Running infercnv individually on ", paste0(names(obj.list), collapse = ", "), "...")
+
+        # run infercnv on each unique value
+        for(i in 1:length(obj.list)){
+            run_infercnv_individual(
+                obj = obj.list[[i]], 
+                ref_obj = ref_obj.list[[i]], 
+                individual_name = names(obj.list)[i], 
+                annot_column = annot_column,
+                org = org,
+                save_dir = save_dir,
+                ...)}
+        } else {
+        # run infercnv on each unique value
+        for(i in 1:length(obj.list)){
+            run_infercnv_individual(
+                obj = obj.list[[i]], 
+                ref_obj = ref_obj, 
+                individual_name = names(obj.list)[i], 
+                annot_column = annot_column,
+                org = org,
+                save_dir = save_dir,
+                ...)}
     }
 }
